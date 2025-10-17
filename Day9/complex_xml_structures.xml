@@ -1,0 +1,8 @@
+<data>
+  <country name="USA">
+    <city name="New York">
+      <person name="John" age="30"/>
+      <person name="Anna" age="25"/>
+    </city>
+  </country>
+</data>
