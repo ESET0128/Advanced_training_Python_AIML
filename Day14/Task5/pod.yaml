@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: flask-pod
+spec:
+  containers:
+    - name: flask-container
+      image: saurabhimage/mydockerimage:c07cb5be8d3a400af1d84dadaa992d317366800b
+      ports:
+        - containerPort: 5000
+  restartPolicy: Always

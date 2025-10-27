@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flask-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: flask
+  strategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: flask
+    spec:
+      containers:
+      - name: flask-container
+        image: saurabhimage/mydockerimage:c07cb5be8d3a400af1d84dadaa992d317366800b
+        ports:
+        - containerPort: 3000
+      restartPolicy: Always
