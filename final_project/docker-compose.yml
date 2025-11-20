@@ -1,0 +1,145 @@
+
+services:
+
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    environment:
+      POSTGRES_DB: postgres          # just a default DB, not used directly
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: admin
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - pipeline_net
+
+
+  airflow-init:
+    build: ./airflow
+    container_name: airflow-init
+    depends_on:
+      - postgres
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres:admin@postgres:5432/postgres
+      AIRFLOW__WEBSERVER__SECRET_KEY: "supersecret_dev_key_1234567890"
+      AIRFLOW__LOGGING__REMOTE_LOGGING: "False"
+    networks:
+      - pipeline_net
+    # Only for init: run DB migration + create admin user, then exit
+    entrypoint: /bin/bash
+    command: -c "
+      airflow db migrate &&
+      airflow users create \
+        --username admin \
+        --password admin \
+        --firstname admin \
+        --lastname airflow \
+        --role Admin \
+        --email admin@example.com || true
+      "
+
+  airflow-webserver:
+    build: ./airflow
+    container_name: airflow-webserver
+    depends_on:
+      - postgres
+      - airflow-init
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres:admin@postgres:5432/postgres
+      AIRFLOW__LOGGING__REMOTE_LOGGING: "False"
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/src:/opt/airflow/src
+      - ./airflow/data:/opt/airflow/data
+      - ./models:/opt/airflow/models
+    ports:
+      - "8080:8080"
+    networks:
+      - pipeline_net
+    # Let the Airflow entrypoint handle "webserver"
+    command: webserver
+
+  airflow-scheduler:
+    build: ./airflow
+    container_name: airflow-scheduler
+    depends_on:
+      - postgres
+      - airflow-init
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres:admin@postgres:5432/postgres
+      AIRFLOW__LOGGING__REMOTE_LOGGING: "False"
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/src:/opt/airflow/src
+      - ./airflow/data:/opt/airflow/data
+      - ./models:/opt/airflow/models
+      - ./mlflow/artifacts:/opt/mlflow/artifacts   # <--- add this
+   
+    networks:
+      - pipeline_net
+    command: scheduler
+
+
+
+  mlflow:
+    build: ./mlflow
+    container_name: mlflow
+    environment:
+      # override or match the Dockerfile ENV, but using explicit driver
+      MLFLOW_BACKEND_STORE_URI: postgresql+psycopg2://postgres:admin@postgres:5432/meter_db
+      MLFLOW_ARTIFACT_ROOT: ./mlflow/artifacts
+    command: >
+      mlflow server
+        --backend-store-uri postgresql+psycopg2://postgres:admin@postgres:5432/meter_db
+        --default-artifact-root ./mlflow/artifacts
+        --host 0.0.0.0
+        --port 5000      
+    volumes:
+      - ./mlflow/artifacts:/opt/mlflow/artifacts
+    depends_on:
+      - postgres
+    ports:
+      - "5000:5000"
+    networks:
+      - pipeline_net
+    restart: unless-stopped
+
+
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: meter_api
+    depends_on:
+      - postgres
+      - mlflow
+    volumes:
+      # Shared model folder between Airflow & API
+      # Change right side if your code expects /tmp/models instead
+      - ./models:/tmp/models
+    ports:
+      - "9000:9000"
+    networks:
+      - pipeline_net
+    restart: unless-stopped
+
+
+
+
+networks:
+  pipeline_net:
+
+volumes:
+  postgres_data:
